@@ -9,10 +9,161 @@ editor: visual
 
 In this project, goal is to create a structured dataset containing each player's name, state, total points, pre-tournament rating, and the average pre-tournament rating of their opponents. So, I will use R code to clean and organize data from a text file containing chess tournament results for this project.
 
-At first, I will import the tournament text file into R and identify the lines containing player information. Then I will extract the relevant player information and the opponent numbers listed for each round. The opponent numbers will be matched to the corresponding players so that their pre-tournament ratings can be identified. I will calculate the average opponent pre-rating for each player and organize the results into a final data frame. Finally, I will export the completed data frame as a CSV file.
+At first, I will import '*tournamentinfo.txt'* text file into R and identify the lines containing player information. Then I will extract the relevant player information and the opponent numbers listed for each round. The opponent numbers will be matched to the corresponding players so that their pre-tournament ratings can be identified. I will calculate the average opponent pre-rating for each player and organize the results into a final data frame. Finally, I will export the completed data frame as a .*CSV* format file.
 
 Challenge of this project is, tournament data is stored in a semi-structured text format rather than a traditional table, so the player information will need to be extracted from different lines and positions in the file. Some pre-tournament ratings also contain additional characters, such as provisional ratings like "1641P17", which will need to be cleaned to obtain the numeric rating. In addition, some rounds contain codes such as B, H, U, or X instead of an opponent number. These entries will need to be handled carefully so that only actual opponents are included when calculating the average opponent pre-rating. Finally, opponent numbers must be correctly matched back to each player's pre-tournament rating.
 
-**Expected Results**
+#### Code Base
 
-Find each player's name, state, total points, pre-tournament rating and the average pre-tournament ratings of player's opponent.
+##### **Import data file**
+
+Chess tournament results are stored in a '*tournamentinfo.txt'* text file rather than a traditional tabular format. I will use `readLines()` in import the file that each line can be examined and processed individually.
+
+```{r, import file}
+chess_raw <- readLines("tournamentinfo.txt")
+head(chess_raw)
+```
+
+##### **Extract Player Records**
+
+Each player record follows a three-line pattern: the player's main information, their state and rating information, and a separator line. Starting at line 5, every third line therefore contains the next player's main information.
+
+```{r, player records}
+player_lines <- chess_raw[seq(5, length(chess_raw), by = 3)]
+head(player_lines)
+```
+
+##### **Extract 'Name' and 'Total Points'**
+
+Each player's main information is separated by the `|` character. I split each line at these separators and extract the player's name and total tournament points. The total points are converted from text to numeric values.
+
+```{r, name & total points}
+player_split <- strsplit(player_lines, "\\|")
+player_name <- trimws(sapply(player_split, `[`, 2))
+total_points <- as.numeric(trimws(sapply(player_split, `[`, 3)))
+
+head(player_name)
+head(total_points)
+```
+
+##### **Extract the 'State' and 'Rating Lines'**
+
+The second line of each player record contains the player's state and rating information. Since these records also occur every three lines, I begin at line 6 and select every third line.
+
+```{r, state & rating}
+rating_lines <- chess_raw[seq(6, length(chess_raw), by = 3)]
+head(rating_lines)
+```
+
+##### **Extract 'State' and 'Pre-Rating'** 
+
+The rating lines are again separated using the `|` character. The first section contains the player's state. The rating information is cleaned to extract only the numeric pre-tournament rating following `R:`. This also allows provisional ratings containing additional characters to be stored as numeric ratings.
+
+```{r, state, pre-rating}
+rating_split <- strsplit(rating_lines, "\\|")
+player_state <- trimws(sapply(rating_split, `[`, 1))
+rating_text <- sapply(rating_split, `[`, 2)
+pre_rating <- as.numeric(
+  sub(".*R:\\s*([0-9]+).*", "\\1", rating_text)
+)
+
+head(player_state)
+head(pre_rating)
+```
+
+##### **Combine Player Information**
+
+The information extracted so far is combined into a single data frame. I also assign each player their tournament player number, which will later be used to match opponents to their pre-tournament ratings.
+
+```{r, player info combined}
+players <- data.frame(
+  player_number = 1:length(player_name),
+  player_name = player_name,
+  state = player_state,
+  total_points = total_points,
+  pre_rating = pre_rating
+)
+
+head(players)
+nrow(players)
+```
+
+The resulting data frame contains 64 players, confirming that all tournament participants were successfully extracted.
+
+##### **Extract Round Results**
+
+Sections 4 through 10 of each player's main record represent the seven tournament rounds. I extract these sections so that the opponent number from each round can be identified.
+
+```{r, round result}
+rounds <- t(sapply(player_split, function(x) x[4:10]))
+
+head(rounds)
+```
+
+##### **Clean Opponent Numbers**
+
+Each round contains a result such as `W`, `L`, or `D` followed by the opponent's player number. I remove all non-numeric characters to retain only the opponent number. Rounds without an opponent number, such as byes or unplayed rounds, are converted to `NA` so they are not included in the opponent-rating calculation.
+
+```{r, clean opp number}
+opponents <- apply(rounds, c(1, 2), function(x) {
+  number <- gsub("[^0-9]", "", x)
+  ifelse(number == "", NA, as.numeric(number))
+})
+
+head(opponents)
+```
+
+##### **Calculate 'Average Opponent Pre-Rating'**
+
+The opponent numbers correspond to the player numbers in the `players` data frame. For each player, I use these numbers to retrieve the pre-tournament ratings of their actual opponents. I then calculate the mean of those ratings while excluding rounds without an opponent. The resulting averages are rounded to whole-number chess ratings.
+
+```{r, avg opp pre-rating}
+avg_opponent_rating <- apply(opponents, 1, function(x) {
+  opponent_ratings <- players$pre_rating[x[!is.na(x)]]
+  mean(opponent_ratings)
+})
+avg_opponent_rating <- round(avg_opponent_rating)
+
+head(avg_opponent_rating)
+
+```
+
+##### **Create the Final Data Frame**
+
+I create the final data frame using only the five variables required for the project: player name, state, total points, pre-tournament rating, and average opponent pre-tournament rating.
+
+```{r, final df}
+final_data <- data.frame(
+  Player_Name = players$player_name,
+  State = players$state,
+  Total_Points = players$total_points,
+  Pre_Rating = players$pre_rating,
+  Avg_Opponent_Pre_Rating = avg_opponent_rating
+)
+
+head(final_data)
+```
+
+##### **Export the CSV File**
+
+Finally, I export the cleaned data frame as a CSV file. Setting `row.names = FALSE` prevents R from creating an unnecessary additional column containing row numbers.
+
+```{r, csv for final result}
+write.csv(
+  final_data,
+  "tournament_results.csv",
+  row.names = FALSE
+)
+
+dim(final_data)
+head(final_data)
+tail(final_data)
+```
+
+##### **Results**
+
+Here, the final dataset contains 64 players and the five variables required for the project: '*player name', 'state', 'total points', 'pre-tournament rating',* and '*average pre-tournament rating of opponents'*. The completed data frame was exported as `tournament_results.csv`, providing a clean version of the tournament data containing all 64 players and the required five variables. As a validation of the results, player *'Gary Hua'* finished the tournament with 6.0 points and had a pre-tournament rating of 1794. His calculated average opponent pre-rating was approximately 1605 after rounding, which matches the expected result provided in the project instructions. This provided a useful check that the opponent numbers were being matched to the correct pre-tournament ratings.
+
+The main complications involved working with a text file that was not already organized into rows and columns, handling provisional ratings containing additional characters, and identifying rounds that did not contain an opponent. These issues were addressed during the cleaning process by using the repeating structure of the tournament records, extracting only the numeric portion of pre-tournament ratings, and converting rounds without opponent numbers to `NA`.
+
+Overall, the project demonstrates how the original semi-structured text file was successfully cleaned and transformed into a structured data frame that can be exported and used in other applications, such as a SQL database. As well, how semi-structured text data can be cleaned, reorganized, and transformed into a structured dataset in `R`.
